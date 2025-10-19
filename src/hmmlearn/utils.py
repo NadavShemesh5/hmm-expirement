@@ -53,19 +53,3 @@ def log_normalize(a, axis=None):
         with np.errstate(under="ignore"):
             a_lse = special.logsumexp(a, axis, keepdims=True)
         a -= a_lse
-
-
-def fill_covars(covars, covariance_type="full", n_components=1, n_features=1):
-    if covariance_type == "full":
-        return covars
-    elif covariance_type == "diag":
-        return np.array(list(map(np.diag, covars)))
-    elif covariance_type == "tied":
-        return np.tile(covars, (n_components, 1, 1))
-    elif covariance_type == "spherical":
-        # Regardless of what is passed in, we flatten in
-        # and then expand it to the correct shape
-        covars = np.ravel(covars)
-        eye = np.eye(n_features)[np.newaxis, :, :]
-        covars = covars[:, np.newaxis, np.newaxis]
-        return eye * covars

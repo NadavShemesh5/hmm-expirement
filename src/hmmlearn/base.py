@@ -7,6 +7,7 @@ import numpy as np
 from scipy import linalg
 from sklearn.base import BaseEstimator
 from sklearn.utils.validation import check_array, check_is_fitted, check_random_state
+from tqdm import tqdm
 
 from . import _hmmc, _utils
 from .utils import normalize, log_normalize
@@ -219,6 +220,15 @@ class _AbstractHMM(BaseEstimator):
         decode : Find most likely state sequence corresponding to ``X``.
         """
         return self._score(X, lengths, compute_posteriors=True)
+
+    def perplexity(self, X, lengths=None):
+        return np.exp(self.average_loss(X, lengths))
+
+    def average_loss(self, X, lengths=None):
+        return self.loss(X, lengths) / len(X)
+
+    def loss(self, X, lengths=None):
+        return -self.score(X, lengths)
 
     def score(self, X, lengths=None):
         """
@@ -495,7 +505,7 @@ class _AbstractHMM(BaseEstimator):
         self._check()
         self.monitor_._reset()
 
-        for iter in range(self.n_iter):
+        for _ in tqdm(range(self.n_iter)):
             stats, curr_logprob = self._do_estep(X, lengths)
 
             # Compute lower bound before updating model parameters

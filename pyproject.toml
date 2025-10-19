@@ -44,6 +44,7 @@ dependencies = [
     "ruff>=0.14.1",
     "scikit-learn>=0.16,!=0.22.0", # check_array, check_is_fitted.
     "scipy>=0.19", # scipy.special.logsumexp.
+    "tqdm>=4.67.1",
 ]
 dynamic = ["version"]
 
