@@ -1,12 +1,12 @@
 from dataset_creation import load_dataset
 from hmmlearn import hmm
 
-datasets = load_dataset("./processed_data")
+datasets = load_dataset("../processed_data")
 X_train = datasets["train"]
 X_test = datasets["test"]
 X_valid = datasets["valid"]
 
-model = hmm.CategoricalHMM(n_components=60, n_iter=100)
+model = hmm.CategoricalHMM(n_components=30, n_iter=100)
 model.fit(
     X_train["tokens"].reshape(-1,1),
     lengths=X_train["lengths"].reshape(-1,1),

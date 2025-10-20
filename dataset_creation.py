@@ -37,6 +37,33 @@ def download_wikitext2(data_dir="./data"):
 
     return data_dir
 
+# def read_file(filepath):
+#     """Read and preprocess WikiText file"""
+#     with open(filepath, "r", encoding="utf-8") as f:
+#         lines = f.readlines()
+#
+#     paragraphs = []
+#     curr_sentences = []
+#     for line in lines:
+#         line = line.strip()
+#         if not line:
+#             continue
+#
+#         if line.startswith("="):
+#             curr_paragraph = " ".join(curr_sentences)
+#             if curr_paragraph:
+#                 paragraphs.append(curr_paragraph)
+#             curr_sentences = []
+#             continue
+#
+#         curr_sentences.append(line)
+#
+#     curr_paragraph = " ".join(curr_sentences)
+#     if curr_paragraph:
+#         paragraphs.append(curr_paragraph)
+#
+#     return paragraphs
+
 
 def read_file(filepath):
     """Read and preprocess WikiText file"""
@@ -54,17 +81,24 @@ def read_file(filepath):
     return sentences
 
 
+# from mosestokenizer import MosesTokenizer
+# tokenizer = MosesTokenizer(lang="en")
+# def tokenize(text):
+#     tokens = tokenizer(text)
+#     return tokens
+
+
 def tokenize(text):
-    tokens = text.lower().split()
+    tokens = text.split()
     return tokens
 
 
-def encode_sentences(sentences, token2idx):
+def encode_paragraphs(paragraphs, token2idx):
     """
     Encode sentences to token indices
 
     Args:
-        sentences: List of sentence strings
+        paragraphs: List of sentence strings
         token2idx: Dictionary mapping tokens to indices
 
     Returns:
@@ -77,8 +111,8 @@ def encode_sentences(sentences, token2idx):
     unk_idx = token2idx["<unk>"]
     eos_idx = token2idx["<eos>"]
 
-    for sentence in sentences:
-        tokens = tokenize(sentence)
+    for paragraph in paragraphs:
+        tokens = tokenize(paragraph)
         # Convert tokens to indices
         indices = [token2idx.get(token, unk_idx) for token in tokens]
         # Add EOS token at the end
@@ -122,7 +156,8 @@ def build_vocab(texts):
 
     return token2idx, idx2token
 
-def save_dataset(dataset, save_dir="../processed_data"):
+
+def save_dataset(dataset, save_dir="./processed_data"):
     """Save processed dataset to disk"""
     os.makedirs(save_dir, exist_ok=True)
 
@@ -180,26 +215,26 @@ if __name__ == "__main__":
     test_path = os.path.join(extract_path, "wiki.test.txt")
 
     print("Reading files...")
-    train_sentences = read_file(train_path)
-    valid_sentences = read_file(valid_path)
-    test_sentences = read_file(test_path)
+    train_paragraphs = read_file(train_path)
+    valid_paragraphs = read_file(valid_path)
+    test_paragraphs = read_file(test_path)
 
-    print(f"Train sentences: {len(train_sentences)}")
-    print(f"Valid sentences: {len(valid_sentences)}")
-    print(f"Test sentences: {len(test_sentences)}")
+    print(f"Train paragraphs: {len(train_paragraphs)}")
+    print(f"Valid paragraphs: {len(valid_paragraphs)}")
+    print(f"Test paragraphs: {len(test_paragraphs)}")
 
     # Build vocabulary from training data only
-    token2idx, idx2token = build_vocab(train_sentences)
+    token2idx, idx2token = build_vocab(train_paragraphs)
 
     # Encode all splits
     print("\nEncoding train set...")
-    train_tokens, train_lengths = encode_sentences(train_sentences, token2idx)
+    train_tokens, train_lengths = encode_paragraphs(train_paragraphs, token2idx)
 
     print("Encoding validation set...")
-    valid_tokens, valid_lengths = encode_sentences(valid_sentences, token2idx)
+    valid_tokens, valid_lengths = encode_paragraphs(valid_paragraphs, token2idx)
 
     print("Encoding test set...")
-    test_tokens, test_lengths = encode_sentences(test_sentences, token2idx)
+    test_tokens, test_lengths = encode_paragraphs(test_paragraphs, token2idx)
 
     # Verify
     assert train_tokens.shape[0] == train_lengths.sum(), "Train: Token count mismatch!"
