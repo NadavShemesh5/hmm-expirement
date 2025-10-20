@@ -1,20 +1,31 @@
+import numpy as np
 from dataset_creation import load_dataset
-from hmmlearn import hmm
+from hmmlearn import naive
 
 datasets = load_dataset("../processed_data")
 X_train = datasets["train"]
 X_test = datasets["test"]
 X_valid = datasets["valid"]
 
-model = hmm.CategoricalHMM(n_components=30, n_iter=100)
-model.fit(
-    X_train["tokens"].reshape(-1,1),
-    lengths=X_train["lengths"].reshape(-1,1),
-    valid=X_valid["tokens"].reshape(-1,1),
-    valid_lengths=X_valid["lengths"].reshape(-1,1)
+num_of_clusters = 512
+mapping = np.random.choice(num_of_clusters, len(datasets["vocab"]["idx2token"]))
+
+# model = hmm.CategoricalHMM(n_components=30, n_iter=100, algorithm="viterbi", implementation="scaling")
+model = naive.CategoricalHMM(
+    n_components=30, n_iter=100, algorithm="map", implementation="scaling"
 )
 
-perplexity = model.perplexity(X_test["tokens"].reshape(-1,1), lengths=X_test["lengths"].reshape(-1,1))
+model.fit(
+    X_train["tokens"].reshape(-1, 1),
+    lengths=X_train["lengths"].reshape(-1, 1),
+    valid=X_valid["tokens"].reshape(-1, 1),
+    valid_lengths=X_valid["lengths"].reshape(-1, 1),
+    mapping=mapping
+)
+
+perplexity = model.perplexity(
+    X_test["tokens"].reshape(-1, 1), lengths=X_test["lengths"].reshape(-1, 1)
+)
 print(f"Perplexity: {perplexity}")
 
 # use the Viterbi algorithm to predict the most likely sequence of states

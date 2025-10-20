@@ -7,6 +7,7 @@ from collections import Counter
 
 special_tokens = ["<unk>", "<eos>"]
 
+
 def download_wikitext2(data_dir="./data"):
     """Download WikiText-2 dataset if not already present"""
     os.makedirs(data_dir, exist_ok=True)
@@ -36,6 +37,7 @@ def download_wikitext2(data_dir="./data"):
         print("WikiText-2 already downloaded.")
 
     return data_dir
+
 
 # def read_file(filepath):
 #     """Read and preprocess WikiText file"""
@@ -121,7 +123,9 @@ def encode_paragraphs(paragraphs, token2idx):
         all_tokens.extend(indices)
         sentence_lengths.append(len(indices))
 
-    return np.array(all_tokens, dtype=np.int32), np.array(sentence_lengths, dtype=np.int32)
+    return np.array(all_tokens, dtype=np.int32), np.array(
+        sentence_lengths, dtype=np.int32
+    )
 
 
 def build_vocab(texts):
@@ -247,9 +251,11 @@ if __name__ == "__main__":
     print(f"Test: {len(test_tokens):,} tokens, {len(test_lengths):,} sentences")
     print(f"Vocabulary size: {len(token2idx):,}")
 
-    save_dataset({
-        "train": {"tokens": train_tokens, "lengths": train_lengths},
-        "valid": {"tokens": valid_tokens, "lengths": valid_lengths},
-        "test": {"tokens": test_tokens, "lengths": test_lengths},
-        "vocab": {"token2idx": token2idx, "idx2token": idx2token},
-    })
+    save_dataset(
+        {
+            "train": {"tokens": train_tokens, "lengths": train_lengths},
+            "valid": {"tokens": valid_tokens, "lengths": valid_lengths},
+            "test": {"tokens": test_tokens, "lengths": test_lengths},
+            "vocab": {"token2idx": token2idx, "idx2token": idx2token},
+        }
+    )
