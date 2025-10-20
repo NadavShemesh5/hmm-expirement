@@ -474,7 +474,7 @@ class _AbstractHMM(BaseEstimator):
 
         return np.atleast_2d(X), np.array(state_sequence, dtype=int)
 
-    def fit(self, X, lengths=None):
+    def fit(self, X, lengths=None, valid=None, valid_lengths=None):
         """
         Estimate model parameters.
 
@@ -505,7 +505,7 @@ class _AbstractHMM(BaseEstimator):
         self._check()
         self.monitor_._reset()
 
-        for _ in tqdm(range(self.n_iter)):
+        for _ in range(self.n_iter):
             stats, curr_logprob = self._do_estep(X, lengths)
 
             # Compute lower bound before updating model parameters
@@ -515,6 +515,11 @@ class _AbstractHMM(BaseEstimator):
             #     there won't be any updates for the case ``n_iter=1``.
             self._do_mstep(stats)
             self.monitor_.report(lower_bound)
+
+            if valid is not None:
+                perplexity = self.perplexity(valid, valid_lengths)
+                print(f"Perplexity: {perplexity}")
+
             if self.monitor_.converged:
                 break
 
@@ -808,7 +813,7 @@ class _AbstractHMM(BaseEstimator):
         stats = self._initialize_sufficient_statistics()
         self._estep_begin()
         curr_logprob = 0
-        for sub_X in _utils.split_X_lengths(X, lengths):
+        for sub_X in tqdm(_utils.split_X_lengths(X, lengths)):
             lattice, logprob, posteriors, fwdlattice, bwdlattice = impl(sub_X)
             # Derived HMM classes will implement the following method to
             # update their probability distributions, so keep

@@ -12,6 +12,8 @@ build/
 dist/
 htmlcov/
 oprofile_data/
+data/
+processed_data/
 .coverage
 .coverage.*
 .gdb_history
