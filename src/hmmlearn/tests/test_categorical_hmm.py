@@ -19,7 +19,7 @@ class TestCategoricalAgainstWikipedia:
         n_components = 2  # ['Rainy', 'Sunny']
         n_features = 3  # ['walk', 'shop', 'clean']
         h = hmm.CategoricalHMM(n_components, implementation=impl)
-        h.n_features = n_features
+        h.n_tokens = n_features
         h.startprob_ = np.array([0.6, 0.4])
         h.transmat_ = np.array([[0.7, 0.3], [0.4, 0.6]])
         h.emissionprob_ = np.array([[0.1, 0.4, 0.5], [0.6, 0.3, 0.1]])
@@ -78,18 +78,18 @@ class TestCategoricalHMM:
     def test_n_features(self, implementation):
         sequences, _ = self.new_hmm(implementation).sample(500)
         # set n_features
-        model = hmm.CategoricalHMM(n_components=2, implementation=implementation)
+        model = hmm.CategoricalHMM(n_states=2, implementation=implementation)
 
         assert_log_likelihood_increasing(model, sequences, [500], 10)
-        assert model.n_features == 3
+        assert model.n_tokens == 3
 
         # Respect n_features
         model = hmm.CategoricalHMM(
-            n_components=2, implementation=implementation, n_features=5
+            n_states=2, implementation=implementation, n_tokens=5
         )
 
         assert_log_likelihood_increasing(model, sequences, [500], 10)
-        assert model.n_features == 5
+        assert model.n_tokens == 5
 
     @pytest.mark.parametrize("implementation", ["scaling", "log"])
     def test_attributes(self, implementation):

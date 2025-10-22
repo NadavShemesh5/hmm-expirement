@@ -12,12 +12,12 @@ mapping = np.random.choice(num_of_clusters, len(datasets["vocab"]["idx2token"]))
 
 # model = hmm.CategoricalHMM(n_components=30, n_iter=100, algorithm="viterbi", implementation="scaling")
 model = hmm.CategoricalHMM(
-    n_components=30, n_iter=100, algorithm="map", implementation="scaling", random_state=1
+    n_states=30, n_iter=100, algorithm="map", implementation="scaling", random_state=1
 )
 
 model.fit(
-    X_train["tokens"].reshape(-1, 1),
-    lengths=X_train["lengths"].reshape(-1, 1),
+    X_valid["tokens"].reshape(-1, 1),
+    lengths=X_valid["lengths"].reshape(-1, 1),
     valid=X_valid["tokens"].reshape(-1, 1),
     valid_lengths=X_valid["lengths"].reshape(-1, 1),
     mapping=mapping

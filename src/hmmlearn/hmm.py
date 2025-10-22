@@ -40,12 +40,12 @@ class CategoricalHMM(BaseEstimator):
 
     def __init__(
         self,
-        n_components=1,
+        n_states=1,
         startprob_prior=1.0,
         transmat_prior=1.0,
         *,
         emissionprob_prior=1.0,
-        n_features=None,
+        n_tokens=None,
         algorithm="viterbi",
         random_state=None,
         n_iter=10,
@@ -58,7 +58,7 @@ class CategoricalHMM(BaseEstimator):
         """
         Parameters
         ----------
-        n_components : int
+        n_states : int
             Number of states.
 
         startprob_prior : array, shape (n_components, ), optional
@@ -73,7 +73,7 @@ class CategoricalHMM(BaseEstimator):
             Parameters of the Dirichlet prior distribution for
             :attr:`emissionprob_`.
 
-        n_features: int, optional
+        n_tokens: int, optional
             The number of categorical symbols in the HMM.  Will be inferred
             from the data if not set.
 
@@ -113,7 +113,7 @@ class CategoricalHMM(BaseEstimator):
             to use logarithms for backwards compatability.
         """
 
-        self.n_components = n_components
+        self.n_states = n_states
         self.params = params
         self.init_params = init_params
         self.algorithm = algorithm
@@ -126,7 +126,7 @@ class CategoricalHMM(BaseEstimator):
         self.transmat_prior = transmat_prior
         self.monitor_ = ConvergenceMonitor(self.tol, self.n_iter, self.verbose)
         self.emissionprob_prior = emissionprob_prior
-        self.n_features = n_features
+        self.n_tokens = n_tokens
 
     def score_samples(self, X, lengths=None):
         """
@@ -213,7 +213,7 @@ class CategoricalHMM(BaseEstimator):
         for the latter).
         """
         log_prob = 0
-        sub_posteriors = [np.empty((0, self.n_components))]
+        sub_posteriors = [np.empty((0, self.n_states))]
         for sub_X in _utils.split_X_lengths(X, lengths):
             log_frameprob = self._compute_log_likelihood(sub_X)
             log_probij, fwdlattice = _hmmc.forward_log(
@@ -231,7 +231,7 @@ class CategoricalHMM(BaseEstimator):
 
     def _score_scaling(self, X, lengths=None, *, compute_posteriors):
         log_prob = 0
-        sub_posteriors = [np.empty((0, self.n_components))]
+        sub_posteriors = [np.empty((0, self.n_states))]
         for sub_X in _utils.split_X_lengths(X, lengths):
             frameprob = self._compute_likelihood(sub_X)
             log_probij, fwdlattice, scaling_factors = _hmmc.forward_scaling(
@@ -524,18 +524,18 @@ class CategoricalHMM(BaseEstimator):
             raise ValueError("Symbols should be integers")
         if X.min() < 0:
             raise ValueError("Symbols should be nonnegative")
-        if self.n_features is not None:
-            if self.n_features - 1 < X.max():
+        if self.n_tokens is not None:
+            if self.n_tokens - 1 < X.max():
                 raise ValueError(
                     f"Largest symbol is {X.max()} but the model only emits "
-                    f"symbols up to {self.n_features - 1}"
+                    f"symbols up to {self.n_tokens - 1}"
                 )
         else:
-            self.n_features = X.max() + 1
+            self.n_tokens = X.max() + 1
 
     def _get_n_fit_scalars_per_param(self):
-        nc = self.n_components
-        nf = self.n_features
+        nc = self.n_states
+        nf = self.n_tokens
         return {
             "s": nc - 1,
             "t": nc * (nc - 1),
@@ -565,21 +565,21 @@ class CategoricalHMM(BaseEstimator):
             don't sum to 1.
         """
         self.startprob_ = np.asarray(self.startprob_)
-        if len(self.startprob_) != self.n_components:
+        if len(self.startprob_) != self.n_states:
             raise ValueError("startprob_ must have length n_components")
         self._check_sum_1("startprob_")
 
         self.transmat_ = np.asarray(self.transmat_)
-        if self.transmat_.shape != (self.n_components, self.n_components):
+        if self.transmat_.shape != (self.n_states, self.n_states):
             raise ValueError("transmat_ must have shape (n_components, n_components)")
         self._check_sum_1("transmat_")
 
         self.emissionprob_ = np.atleast_2d(self.emissionprob_)
-        if self.n_features is None:
-            self.n_features = self.emissionprob_.shape[1]
-        if self.emissionprob_.shape != (self.n_components, self.n_features):
+        if self.n_tokens is None:
+            self.n_tokens = self.emissionprob_.shape[1]
+        if self.emissionprob_.shape != (self.n_states, self.n_tokens):
             raise ValueError(
-                f"emissionprob_ must have shape({self.n_components}, {self.n_features})"
+                f"emissionprob_ must have shape({self.n_states}, {self.n_tokens})"
             )
         self._check_sum_1("emissionprob_")
 
@@ -637,9 +637,9 @@ class CategoricalHMM(BaseEstimator):
         """
         stats = {
             "nobs": 0,
-            "start": np.zeros(self.n_components),
-            "trans": np.zeros((self.n_components, self.n_components)),
-            "obs": np.zeros((self.n_components, self.n_features)),
+            "start": np.zeros(self.n_states),
+            "trans": np.zeros((self.n_states, self.n_states)),
+            "obs": np.zeros((self.n_states, self.n_tokens)),
         }
         return stats
 
@@ -812,13 +812,13 @@ class CategoricalHMM(BaseEstimator):
             Feature matrix of individual samples.
         """
         self._check_and_set_n_features(X)
-        init = 1.0 / self.n_components
+        init = 1.0 / self.n_states
         random_state = check_random_state(self.random_state)
         if self._needs_init("s", "startprob_"):
-            self.startprob_ = random_state.dirichlet(np.full(self.n_components, init))
+            self.startprob_ = random_state.dirichlet(np.full(self.n_states, init))
         if self._needs_init("t", "transmat_"):
             self.transmat_ = random_state.dirichlet(
-                np.full(self.n_components, init), size=self.n_components
+                np.full(self.n_states, init), size=self.n_states
             )
         n_fit_scalars_per_param = self._get_n_fit_scalars_per_param()
         if n_fit_scalars_per_param is not None:
@@ -835,7 +835,7 @@ class CategoricalHMM(BaseEstimator):
 
         if self._needs_init("e", "emissionprob_"):
             self.emissionprob_ = self.random_state.rand(
-                self.n_components, self.n_features
+                self.n_states, self.n_tokens
             )
             normalize(self.emissionprob_, axis=1)
 

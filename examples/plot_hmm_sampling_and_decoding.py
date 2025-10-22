@@ -83,7 +83,7 @@ for n_components in (3, 4, 5):
 
 # get the best model
 model = models[np.argmax(scores)]
-n_states = model.n_components
+n_states = model.n_states
 print(f"The best model had a score of {max(scores)} and {n_states} states")
 
 # use the Viterbi algorithm to predict the most likely sequence of states
