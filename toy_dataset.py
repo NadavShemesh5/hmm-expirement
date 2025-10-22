@@ -1,6 +1,6 @@
 import numpy as np
 from dataset_creation import load_dataset
-from hmmlearn import naive
+from hmmlearn import hmm
 
 datasets = load_dataset("../processed_data")
 X_train = datasets["train"]
@@ -11,8 +11,8 @@ num_of_clusters = 512
 mapping = np.random.choice(num_of_clusters, len(datasets["vocab"]["idx2token"]))
 
 # model = hmm.CategoricalHMM(n_components=30, n_iter=100, algorithm="viterbi", implementation="scaling")
-model = naive.CategoricalHMM(
-    n_components=30, n_iter=100, algorithm="map", implementation="scaling"
+model = hmm.CategoricalHMM(
+    n_components=30, n_iter=100, algorithm="map", implementation="scaling", random_state=1
 )
 
 model.fit(

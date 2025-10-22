@@ -607,16 +607,9 @@ class CategoricalHMM(BaseEstimator):
             Emission log probability of each sample in ``X`` for each of the
             model states, i.e., ``log(p(X|state))``.
         """
-        if (
-            self._compute_likelihood  # prevent recursion
-            != __class__._compute_likelihood.__get__(self)
-        ):
-            # Probabilities equal to zero do occur, and log(0) = -inf is OK.
-            likelihood = self._compute_likelihood(X)
-            with np.errstate(divide="ignore"):
-                return np.log(likelihood)
-        else:
-            raise NotImplementedError("Must be overridden in subclass")
+        likelihood = self._compute_likelihood(X)
+        with np.errstate(divide="ignore"):
+            return np.log(likelihood)
 
     def _generate_sample_from_state(self, state, random_state=None):
         cdf = np.cumsum(self.emissionprob_[state, :])
