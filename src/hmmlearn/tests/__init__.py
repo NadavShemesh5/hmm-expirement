@@ -91,7 +91,7 @@ def compare_variational_and_em_models(variational, em, sequences, lengths):
 
 
 def vi_uniform_startprob_and_transmat(model, lengths):
-    nc = model.n_components
+    nc = model.n_states
     model.startprob_prior_ = np.full(nc, 1 / nc)
     model.startprob_posterior_ = np.full(nc, 1 / nc) * len(lengths)
     model.transmat_prior_ = np.full((nc, nc), 1 / nc)

@@ -2,6 +2,7 @@
 #include <pybind11/numpy.h>
 #include <cfenv>
 #include <limits>
+#define SAFE_ACCESS(arr, ...) arr.at(__VA_ARGS__)
 
 namespace py = pybind11;
 using ssize_t = Py_ssize_t;
@@ -46,18 +47,16 @@ py::array_t<double> log(
 std::tuple<double, py::array_t<double>, py::array_t<double>> forward_scaling(
   py::array_t<double> startprob_,
   py::array_t<double> transmat_,
-  py::array_t<double> frameprob_)
+  py::array_t<double> frameprob_,
+  py::array_t<int> clusters_offset_)
 {
   auto min_sum = 1e-300;
 
   auto startprob = startprob_.unchecked<1>();
   auto transmat = transmat_.unchecked<2>();
   auto frameprob = frameprob_.unchecked<2>();
+  auto clusters_offset = clusters_offset_.unchecked<1>();
   auto ns = frameprob.shape(0), nc = frameprob.shape(1);
-  if (startprob.shape(0) != nc
-      || transmat.shape(0) != nc || transmat.shape(1) != nc) {
-    throw std::invalid_argument{"shape mismatch"};
-  }
   auto fwdlattice_ = py::array_t<double>{{ns, nc}};
   auto fwd = fwdlattice_.mutable_unchecked<2>();
   auto scaling_ = py::array_t<double>{{ns}};
@@ -66,8 +65,9 @@ std::tuple<double, py::array_t<double>, py::array_t<double>> forward_scaling(
   {
     py::gil_scoped_release nogil;
     std::fill_n(fwd.mutable_data(0, 0), fwd.size(), 0);
+    auto offset = clusters_offset(0);
     for (auto i = 0; i < nc; ++i) {
-      fwd(0, i) = startprob(i) * frameprob(0, i);
+      fwd(0, i) = startprob(offset + i) * frameprob(0, i);
     }
     auto sum = std::accumulate(&fwd(0, 0), &fwd(0, nc), 0.);
     if (sum < min_sum) {
@@ -80,9 +80,11 @@ std::tuple<double, py::array_t<double>, py::array_t<double>> forward_scaling(
       fwd(0, i) *= scale;
     }
     for (auto t = 1; t < ns; ++t) {
+      auto offset = clusters_offset(t);
+      auto prev_offset = clusters_offset(t - 1);
       for (auto j = 0; j < nc; ++j) {
         for (auto i = 0; i < nc; ++i) {
-          fwd(t, j) += fwd(t - 1, i) * transmat(i, j);
+          fwd(t, j) += fwd(t - 1, i) * transmat(prev_offset + i, offset + j);
         }
         fwd(t, j) *= frameprob(t, j);
       }
@@ -141,18 +143,15 @@ py::array_t<double> backward_scaling(
   py::array_t<double> startprob_,
   py::array_t<double> transmat_,
   py::array_t<double> frameprob_,
+  py::array_t<int> clusters_offset_,
   py::array_t<double> scaling_)
 {
   auto startprob = startprob_.unchecked<1>();
   auto transmat = transmat_.unchecked<2>();
   auto frameprob = frameprob_.unchecked<2>();
+  auto clusters_offset = clusters_offset_.unchecked<1>();
   auto scaling = scaling_.unchecked<1>();
   auto ns = frameprob.shape(0), nc = frameprob.shape(1);
-  if (startprob.shape(0) != nc
-      || transmat.shape(0) != nc || transmat.shape(1) != nc
-      || scaling.shape(0) != ns) {
-    throw std::invalid_argument{"shape mismatch"};
-  }
   auto bwdlattice_ = py::array_t<double>{{ns, nc}};
   auto bwd = bwdlattice_.mutable_unchecked<2>();
   py::gil_scoped_release nogil;
@@ -161,9 +160,11 @@ py::array_t<double> backward_scaling(
     bwd(ns - 1, i) = scaling(ns - 1);
   }
   for (auto t = ns - 2; t >= 0; --t) {
+    auto offset = clusters_offset(t);
+    auto next_offset = clusters_offset(t + 1);
     for (auto i = 0; i < nc; ++i) {
       for (auto j = 0; j < nc; ++j) {
-        bwd(t, i) += transmat(i, j) * frameprob(t + 1, j) * bwd(t + 1, j);
+        bwd(t, i) += transmat(offset + i, next_offset + j) * frameprob(t + 1, j) * bwd(t + 1, j);
       }
       bwd(t, i) *= scaling(t);
     }
@@ -204,37 +205,34 @@ py::array_t<double> backward_log(
   return bwdlattice_;
 }
 
-py::array_t<double> compute_scaling_xi_sum(
+void compute_scaling_xi_sum(
   py::array_t<double> fwdlattice_,
   py::array_t<double> transmat_,
   py::array_t<double> bwdlattice_,
-  py::array_t<double> frameprob_)
+  py::array_t<double> frameprob_,
+  py::array_t<double> xi_sum_,
+  py::array_t<int> clusters_offset_)
 {
   auto fwd = fwdlattice_.unchecked<2>();
   auto transmat = transmat_.unchecked<2>();
   auto bwd = bwdlattice_.unchecked<2>();
   auto frameprob = frameprob_.unchecked<2>();
+  auto clusters_offset = clusters_offset_.unchecked<1>();
   auto ns = frameprob.shape(0), nc = frameprob.shape(1);
-  if (fwd.shape(0) != ns || fwd.shape(1) != nc
-      || transmat.shape(0) != nc || transmat.shape(1) != nc
-      || bwd.shape(0) != ns || bwd.shape(1) != nc) {
-    throw std::invalid_argument{"shape mismatch"};
-  }
-  auto xi_sum_ = py::array_t<double>{{nc, nc}};
   auto xi_sum = xi_sum_.mutable_unchecked<2>();
-  std::fill_n(xi_sum.mutable_data(0, 0), xi_sum.size(), 0);
   py::gil_scoped_release nogil;
   for (auto t = 0; t < ns - 1; ++t) {
+    auto offset = clusters_offset(t);
+    auto next_offset = clusters_offset(t + 1);
     for (auto i = 0; i < nc; ++i) {
       for (auto j = 0; j < nc; ++j) {
-        xi_sum(i, j) += fwd(t, i)
-                        * transmat(i, j)
+        xi_sum(offset + i, next_offset +  j) += fwd(t, i)
+                        * transmat(offset + i, next_offset + j)
                         * frameprob(t + 1, j)
                         * bwd(t + 1, j);
       }
     }
   }
-  return xi_sum_;
 }
 
 py::array_t<double> compute_log_xi_sum(
