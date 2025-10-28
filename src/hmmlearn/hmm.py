@@ -5,7 +5,11 @@ from tqdm import tqdm
 import numpy as np
 from sklearn.base import BaseEstimator
 from . import _hmmc, _utils
-from .utils import normalize, log_normalize
+from .utils import (
+    normalize,
+    log_normalize,
+    normalize_by_indexes,
+)
 
 from hmmlearn.converge_monitor import ConvergenceMonitor, _log
 
@@ -45,7 +49,6 @@ class CategoricalHMM(BaseEstimator):
         transmat_prior=1.0,
         *,
         emissionprob_prior=1.0,
-        n_tokens=None,
         algorithm="viterbi",
         random_state=None,
         n_iter=10,
@@ -54,6 +57,7 @@ class CategoricalHMM(BaseEstimator):
         params="ste",
         init_params="ste",
         implementation="log",
+        n_clusters=1,
     ):
         """
         Parameters
@@ -72,10 +76,6 @@ class CategoricalHMM(BaseEstimator):
         emissionprob_prior : array, shape (n_components, n_features), optional
             Parameters of the Dirichlet prior distribution for
             :attr:`emissionprob_`.
-
-        n_tokens: int, optional
-            The number of categorical symbols in the HMM.  Will be inferred
-            from the data if not set.
 
         algorithm : {"viterbi", "map"}, optional
             Decoder algorithm.
@@ -111,6 +111,8 @@ class CategoricalHMM(BaseEstimator):
             Determines if the forward-backward algorithm is implemented with
             logarithms ("log"), or using scaling ("scaling").  The default is
             to use logarithms for backwards compatability.
+
+        n_clusters : int, optional
         """
 
         self.n_states = n_states
@@ -126,7 +128,13 @@ class CategoricalHMM(BaseEstimator):
         self.transmat_prior = transmat_prior
         self.monitor_ = ConvergenceMonitor(self.tol, self.n_iter, self.verbose)
         self.emissionprob_prior = emissionprob_prior
-        self.n_tokens = n_tokens
+        self.n_tokens = None
+        self.n_emit_components = None
+        self.n_clusters = n_clusters
+        assert self.n_states % self.n_clusters == 0, (
+            "n_components must be divisible by n_clusters"
+        )
+        self.clusters_offset = None
 
     def score_samples(self, X, lengths=None):
         """
@@ -216,13 +224,14 @@ class CategoricalHMM(BaseEstimator):
         sub_posteriors = [np.empty((0, self.n_states))]
         for sub_X in _utils.split_X_lengths(X, lengths):
             log_frameprob = self._compute_log_likelihood(sub_X)
+            clusters_offset = self._compute_offsets(sub_X)
             log_probij, fwdlattice = _hmmc.forward_log(
-                self.startprob_, self.transmat_, log_frameprob
+                self.startprob_, self.transmat_, log_frameprob, clusters_offset
             )
             log_prob += log_probij
             if compute_posteriors:
                 bwdlattice = _hmmc.backward_log(
-                    self.startprob_, self.transmat_, log_frameprob
+                    self.startprob_, self.transmat_, log_frameprob, clusters_offset
                 )
                 sub_posteriors.append(
                     self._compute_posteriors_log(fwdlattice, bwdlattice)
@@ -234,13 +243,14 @@ class CategoricalHMM(BaseEstimator):
         sub_posteriors = [np.empty((0, self.n_states))]
         for sub_X in _utils.split_X_lengths(X, lengths):
             frameprob = self._compute_likelihood(sub_X)
+            clusters_offset = self._compute_offsets(sub_X)
             log_probij, fwdlattice, scaling_factors = _hmmc.forward_scaling(
-                self.startprob_, self.transmat_, frameprob
+                self.startprob_, self.transmat_, frameprob, clusters_offset
             )
             log_prob += log_probij
             if compute_posteriors:
                 bwdlattice = _hmmc.backward_scaling(
-                    self.startprob_, self.transmat_, frameprob, scaling_factors
+                    self.startprob_, self.transmat_, frameprob, clusters_offset, scaling_factors
                 )
                 sub_posteriors.append(
                     self._compute_posteriors_scaling(fwdlattice, bwdlattice)
@@ -407,7 +417,7 @@ class CategoricalHMM(BaseEstimator):
 
         return np.atleast_2d(X), np.array(state_sequence, dtype=int)
 
-    def fit(self, X, lengths=None, valid=None, valid_lengths=None, mapping=None):
+    def fit(self, X, lengths=None, valid=None, valid_lengths=None):
         """
         Estimate model parameters.
 
@@ -430,9 +440,6 @@ class CategoricalHMM(BaseEstimator):
             Returns self.
         """
         X = check_array(X)
-        if mapping is None:
-            mapping = np.zeros(X.shape[0])
-
         if lengths is None:
             lengths = np.asarray([X.shape[0]])
 
@@ -443,13 +450,10 @@ class CategoricalHMM(BaseEstimator):
         for _ in range(self.n_iter):
             stats, curr_logprob = self._do_estep(X, lengths)
 
-            # Compute lower bound before updating model parameters
-            lower_bound = self._compute_lower_bound(curr_logprob)
-
             # XXX must be before convergence check, because otherwise
             #     there won't be any updates for the case ``n_iter=1``.
             self._do_mstep(stats)
-            self.monitor_.report(lower_bound)
+            self.monitor_.report(curr_logprob)
 
             if valid is not None:
                 perplexity = self.perplexity(valid, valid_lengths)
@@ -465,23 +469,27 @@ class CategoricalHMM(BaseEstimator):
                 )
         return self
 
-    def _fit_scaling(self, X):
+    def _fit_scaling(self, X, clusters_offset):
         frameprob = self._compute_likelihood(X)
         log_prob, fwdlattice, scaling_factors = _hmmc.forward_scaling(
-            self.startprob_, self.transmat_, frameprob
+            self.startprob_, self.transmat_, frameprob, clusters_offset
         )
         bwdlattice = _hmmc.backward_scaling(
-            self.startprob_, self.transmat_, frameprob, scaling_factors
+            self.startprob_,
+            self.transmat_,
+            frameprob,
+            clusters_offset,
+            scaling_factors,
         )
         posteriors = self._compute_posteriors_scaling(fwdlattice, bwdlattice)
         return frameprob, log_prob, posteriors, fwdlattice, bwdlattice
 
-    def _fit_log(self, X):
+    def _fit_log(self, X, clusters_offset):
         log_frameprob = self._compute_log_likelihood(X)
         log_prob, fwdlattice = _hmmc.forward_log(
-            self.startprob_, self.transmat_, log_frameprob
+            self.startprob_, self.transmat_, log_frameprob, clusters_offset
         )
-        bwdlattice = _hmmc.backward_log(self.startprob_, self.transmat_, log_frameprob)
+        bwdlattice = _hmmc.backward_log(self.startprob_, self.transmat_, log_frameprob, clusters_offset)
         posteriors = self._compute_posteriors_log(fwdlattice, bwdlattice)
         return log_frameprob, log_prob, posteriors, fwdlattice, bwdlattice
 
@@ -533,19 +541,10 @@ class CategoricalHMM(BaseEstimator):
         else:
             self.n_tokens = X.max() + 1
 
-    def _get_n_fit_scalars_per_param(self):
-        nc = self.n_states
-        nf = self.n_tokens
-        return {
-            "s": nc - 1,
-            "t": nc * (nc - 1),
-            "e": nc * (nf - 1),
-        }
-
     def _check_sum_1(self, name):
         """Check that an array describes one or more distributions."""
         s = getattr(self, name).sum(axis=-1)
-        if not np.allclose(s, 1):
+        if not np.allclose(s, self.n_clusters):
             raise ValueError(
                 f"{name} must sum to 1 (got {s:.4f})"
                 if s.ndim == 0
@@ -567,30 +566,27 @@ class CategoricalHMM(BaseEstimator):
         self.startprob_ = np.asarray(self.startprob_)
         if len(self.startprob_) != self.n_states:
             raise ValueError("startprob_ must have length n_components")
-        self._check_sum_1("startprob_")
+        # self._check_sum_1("startprob_")
 
         self.transmat_ = np.asarray(self.transmat_)
         if self.transmat_.shape != (self.n_states, self.n_states):
             raise ValueError("transmat_ must have shape (n_components, n_components)")
-        self._check_sum_1("transmat_")
+        # self._check_sum_1("transmat_")
 
         self.emissionprob_ = np.atleast_2d(self.emissionprob_)
         if self.n_tokens is None:
             self.n_tokens = self.emissionprob_.shape[1]
-        if self.emissionprob_.shape != (self.n_states, self.n_tokens):
+        if self.emissionprob_.shape != (self.n_emit_components, self.n_tokens):
             raise ValueError(
-                f"emissionprob_ must have shape({self.n_states}, {self.n_tokens})"
+                f"emissionprob_ must have shape({self.n_emit_components}, {self.n_tokens})"
             )
-        self._check_sum_1("emissionprob_")
+        # self._check_sum_1("emissionprob_")
 
     def _compute_likelihood(self, X):
-        if X.shape[1] != 1:
-            warnings.warn(
-                "Inputs of shape other than (n_samples, 1) are deprecated.",
-                DeprecationWarning,
-            )
-            X = np.concatenate(X)[:, None]
         return self.emissionprob_[:, X.squeeze(1)].T
+
+    def _compute_offsets(self, X):
+        return self.clusters_offset[X.squeeze(1)].T
 
     def _compute_log_likelihood(self, X):
         """
@@ -639,12 +635,12 @@ class CategoricalHMM(BaseEstimator):
             "nobs": 0,
             "start": np.zeros(self.n_states),
             "trans": np.zeros((self.n_states, self.n_states)),
-            "obs": np.zeros((self.n_states, self.n_tokens)),
+            "obs": np.zeros((self.n_emit_components, self.n_tokens)),
         }
         return stats
 
     def _accumulate_sufficient_statistics(
-        self, stats, X, lattice, posteriors, fwdlattice, bwdlattice
+        self, stats, X, lattice, posteriors, fwdlattice, bwdlattice, clusters_offset
     ):
         """
         Update sufficient statistics from a given sample.
@@ -683,6 +679,7 @@ class CategoricalHMM(BaseEstimator):
             posteriors=posteriors,
             fwdlattice=fwdlattice,
             bwdlattice=bwdlattice,
+            clusters_offset=clusters_offset,
         )
 
         if "e" in self.params:
@@ -695,7 +692,7 @@ class CategoricalHMM(BaseEstimator):
             np.add.at(stats["obs"].T, X.squeeze(1), posteriors)
 
     def _accumulate_sufficient_statistics_scaling(
-        self, stats, X, lattice, posteriors, fwdlattice, bwdlattice
+        self, stats, X, lattice, posteriors, fwdlattice, bwdlattice, clusters_offset
     ):
         """
         Implementation of `_accumulate_sufficient_statistics`
@@ -703,7 +700,8 @@ class CategoricalHMM(BaseEstimator):
         """
         stats["nobs"] += 1
         if "s" in self.params:
-            stats["start"] += posteriors[0]
+            offset = clusters_offset[0]
+            stats["start"][offset:offset+self.n_emit_components] += posteriors[0]
         if "t" in self.params:
             n_samples, n_components = lattice.shape
             # when the sample is of length 1, it contains no transitions
@@ -711,12 +709,12 @@ class CategoricalHMM(BaseEstimator):
             if n_samples <= 1:
                 return
             xi_sum = _hmmc.compute_scaling_xi_sum(
-                fwdlattice, self.transmat_, bwdlattice, lattice
+                fwdlattice, self.transmat_, bwdlattice, lattice, clusters_offset
             )
             stats["trans"] += xi_sum
 
     def _accumulate_sufficient_statistics_log(
-        self, stats, X, lattice, posteriors, fwdlattice, bwdlattice
+        self, stats, X, lattice, posteriors, fwdlattice, bwdlattice, clusters_offset
     ):
         """
         Implementation of `_accumulate_sufficient_statistics`
@@ -724,7 +722,8 @@ class CategoricalHMM(BaseEstimator):
         """
         stats["nobs"] += 1
         if "s" in self.params:
-            stats["start"] += posteriors[0]
+            offset = clusters_offset[0]
+            stats["start"][offset:offset+self.n_emit_components] += posteriors[0]
         if "t" in self.params:
             n_samples, n_components = lattice.shape
             # when the sample is of length 1, it contains no transitions
@@ -732,7 +731,7 @@ class CategoricalHMM(BaseEstimator):
             if n_samples <= 1:
                 return
             log_xi_sum = _hmmc.compute_log_xi_sum(
-                fwdlattice, self.transmat_, bwdlattice, lattice
+                fwdlattice, self.transmat_, bwdlattice, lattice, clusters_offset
             )
             with np.errstate(under="ignore"):
                 stats["trans"] += np.exp(log_xi_sum)
@@ -755,7 +754,7 @@ class CategoricalHMM(BaseEstimator):
         if "s" in self.params:
             startprob_ = np.maximum(self.startprob_prior - 1 + stats["start"], 0)
             self.startprob_ = np.where(self.startprob_ == 0, 0, startprob_)
-            normalize(self.startprob_)
+            normalize_by_indexes(self.startprob_, self.cluster2states)
         if "t" in self.params:
             transmat_ = np.maximum(self.transmat_prior - 1 + stats["trans"], 0)
             self.transmat_ = np.where(self.transmat_ == 0, 0, transmat_)
@@ -764,7 +763,7 @@ class CategoricalHMM(BaseEstimator):
             self.emissionprob_ = np.maximum(
                 self.emissionprob_prior - 1 + stats["obs"], 0
             )
-            normalize(self.emissionprob_, axis=1)
+            normalize_by_indexes(self.emissionprob_, self.cluster2tokens, axis=1)
 
     def _do_estep(self, X, lengths):
         impl = {
@@ -773,24 +772,18 @@ class CategoricalHMM(BaseEstimator):
         }[self.implementation]
 
         stats = self._initialize_sufficient_statistics()
-        self._estep_begin()
         curr_logprob = 0
         for sub_X in tqdm(_utils.split_X_lengths(X, lengths)):
-            lattice, logprob, posteriors, fwdlattice, bwdlattice = impl(sub_X)
+            clusters_offset = self._compute_offsets(sub_X)
+            lattice, logprob, posteriors, fwdlattice, bwdlattice = impl(sub_X, clusters_offset)
             # Derived HMM classes will implement the following method to
             # update their probability distributions, so keep
             # a single call to this method for simplicity.
             self._accumulate_sufficient_statistics(
-                stats, sub_X, lattice, posteriors, fwdlattice, bwdlattice
+                stats, sub_X, lattice, posteriors, fwdlattice, bwdlattice, clusters_offset
             )
             curr_logprob += logprob
         return stats, curr_logprob
-
-    def _estep_begin(self):
-        pass
-
-    def _compute_lower_bound(self, curr_logprob):
-        return curr_logprob
 
     def get_stationary_distribution(self):
         """Compute the stationary distribution of states."""
@@ -812,77 +805,28 @@ class CategoricalHMM(BaseEstimator):
             Feature matrix of individual samples.
         """
         self._check_and_set_n_features(X)
-        init = 1.0 / self.n_states
+        self.n_emit_components = self.n_states // self.n_clusters
         random_state = check_random_state(self.random_state)
-        if self._needs_init("s", "startprob_"):
-            self.startprob_ = random_state.dirichlet(np.full(self.n_states, init))
-        if self._needs_init("t", "transmat_"):
-            self.transmat_ = random_state.dirichlet(
-                np.full(self.n_states, init), size=self.n_states
-            )
-        n_fit_scalars_per_param = self._get_n_fit_scalars_per_param()
-        if n_fit_scalars_per_param is not None:
-            n_fit_scalars = sum(n_fit_scalars_per_param[p] for p in self.params)
-            if X.size < n_fit_scalars:
-                _log.warning(
-                    "Fitting a model with %d free scalar parameters with only "
-                    "%d data points will result in a degenerate solution.",
-                    n_fit_scalars,
-                    X.size,
-                )
-
         self.random_state = check_random_state(self.random_state)
 
         if self._needs_init("e", "emissionprob_"):
-            self.emissionprob_ = self.random_state.rand(
-                self.n_states, self.n_tokens
+            # self.clusters_offset = np.random.choice(self.n_clusters, self.n_tokens) * self.n_emit_components
+            self.clusters_offset = np.sort(np.random.choice(self.n_clusters, self.n_tokens) * self.n_emit_components)
+            self.cluster2tokens = [np.where(self.clusters_offset == i * self.n_emit_components)[0] for i in range(self.n_clusters)]
+            self.emissionprob_ = self.random_state.rand(self.n_emit_components, self.n_tokens)
+            normalize_by_indexes(self.emissionprob_, self.cluster2tokens, axis=1)
+
+        if self._needs_init("s", "startprob_"):
+            init = 1.0 / self.n_emit_components
+            self.startprob_ = np.array(list(random_state.dirichlet(np.full(self.n_emit_components, init)) for _ in range(self.n_clusters))).flatten()
+            # self.startprob_ = np.ones(self.n_states) * (self.n_clusters / self.n_states)
+            cluster2states_2d = np.arange(self.n_clusters * self.n_emit_components).reshape(self.n_clusters, self.n_emit_components)
+            self.cluster2states = [cluster2states for cluster2states in cluster2states_2d]
+            normalize_by_indexes(self.startprob_, self.cluster2states)
+
+        if self._needs_init("t", "transmat_"):
+            init = 1.0  / self.n_states
+            self.transmat_ = random_state.dirichlet(
+                np.full(self.n_states, init), size=self.n_states
             )
-            normalize(self.emissionprob_, axis=1)
-
-    def aic(self, X, lengths=None):
-        """
-        Akaike information criterion for the current model on the input X.
-
-        AIC = -2*logLike + 2 * num_free_params
-
-        https://en.wikipedia.org/wiki/Akaike_information_criterion
-
-        Parameters
-        ----------
-        X : array of shape (n_samples, n_dimensions)
-            The input samples.
-        lengths : array-like of integers, shape (n_sequences, )
-            Lengths of the individual sequences in ``X``. The sum of
-            these should be ``n_samples``.
-
-        Returns
-        -------
-        aic : float
-            The lower the better.
-        """
-        n_params = sum(self._get_n_fit_scalars_per_param().values())
-        return -2 * self.score(X, lengths=lengths) + 2 * n_params
-
-    def bic(self, X, lengths=None):
-        """
-        Bayesian information criterion for the current model on the input X.
-
-        BIC = -2*logLike + num_free_params * log(num_of_data)
-
-        https://en.wikipedia.org/wiki/Bayesian_information_criterion
-
-        Parameters
-        ----------
-        X : array of shape (n_samples, n_dimensions)
-            The input samples.
-        lengths : array-like of integers, shape (n_sequences, )
-            Lengths of the individual sequences in ``X``. The sum of
-            these should be ``n_samples``.
-
-        Returns
-        -------
-        bic : float
-            The lower the better.
-        """
-        n_params = sum(self._get_n_fit_scalars_per_param().values())
-        return -2 * self.score(X, lengths=lengths) + n_params * np.log(len(X))
+            # self.transmat_ = np.ones((self.n_states, self.n_states)) / self.n_states

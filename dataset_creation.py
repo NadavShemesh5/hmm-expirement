@@ -1,5 +1,6 @@
 import os
 
+import random
 import numpy as np
 import urllib.request
 from collections import Counter
@@ -90,6 +91,11 @@ def read_file(filepath):
 #     return tokens
 
 
+# def tokenize(text):
+#     tokens = text.lower().split()
+#     return tokens
+
+
 def tokenize(text):
     tokens = text.split()
     return tokens
@@ -143,16 +149,25 @@ def build_vocab(texts):
         tokens = tokenize(text)
         token_counter.update(tokens)
 
+    # token2idx = {}
+    # # Add special tokens first
+    # for token in special_tokens:
+    #     token2idx[token] = len(token2idx)
+    #
+    # # Add tokens to vocabulary
+    # for token in token_counter:
+    #     if token in special_tokens:
+    #         continue
+    #
+    #     token2idx[token] = len(token2idx)
+
+    token_counter.update(special_tokens)
+    tokens = list(token_counter.keys())
+    random.shuffle(tokens)
+
     token2idx = {}
-    # Add special tokens first
-    for token in special_tokens:
-        token2idx[token] = len(token2idx)
-
     # Add tokens to vocabulary
-    for token in token_counter:
-        if token in special_tokens:
-            continue
-
+    for token in tokens:
         token2idx[token] = len(token2idx)
 
     # Create reverse mapping
