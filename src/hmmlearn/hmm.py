@@ -708,10 +708,9 @@ class CategoricalHMM(BaseEstimator):
             # so there is no reason to update our trans. matrix estimate
             if n_samples <= 1:
                 return
-            xi_sum = _hmmc.compute_scaling_xi_sum(
-                fwdlattice, self.transmat_, bwdlattice, lattice, clusters_offset
+            _hmmc.compute_scaling_xi_sum(
+                fwdlattice, self.transmat_, bwdlattice, lattice, stats["trans"], clusters_offset
             )
-            stats["trans"] += xi_sum
 
     def _accumulate_sufficient_statistics_log(
         self, stats, X, lattice, posteriors, fwdlattice, bwdlattice, clusters_offset
@@ -826,7 +825,7 @@ class CategoricalHMM(BaseEstimator):
 
         if self._needs_init("t", "transmat_"):
             init = 1.0  / self.n_states
+            # init = 1.0  / self.n_emit_components
             self.transmat_ = random_state.dirichlet(
                 np.full(self.n_states, init), size=self.n_states
             )
-            # self.transmat_ = np.ones((self.n_states, self.n_states)) / self.n_states

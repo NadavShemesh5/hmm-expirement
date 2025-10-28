@@ -205,11 +205,12 @@ py::array_t<double> backward_log(
   return bwdlattice_;
 }
 
-py::array_t<double> compute_scaling_xi_sum(
+void compute_scaling_xi_sum(
   py::array_t<double> fwdlattice_,
   py::array_t<double> transmat_,
   py::array_t<double> bwdlattice_,
   py::array_t<double> frameprob_,
+  py::array_t<double> xi_sum_,
   py::array_t<int> clusters_offset_)
 {
   auto fwd = fwdlattice_.unchecked<2>();
@@ -217,10 +218,8 @@ py::array_t<double> compute_scaling_xi_sum(
   auto bwd = bwdlattice_.unchecked<2>();
   auto frameprob = frameprob_.unchecked<2>();
   auto clusters_offset = clusters_offset_.unchecked<1>();
-  auto ns = frameprob.shape(0), nc = frameprob.shape(1), na = transmat.shape(0);
-  auto xi_sum_ = py::array_t<double>{{na,  na}};
+  auto ns = frameprob.shape(0), nc = frameprob.shape(1);
   auto xi_sum = xi_sum_.mutable_unchecked<2>();
-  std::fill_n(xi_sum.mutable_data(0, 0), xi_sum.size(), 0);
   py::gil_scoped_release nogil;
   for (auto t = 0; t < ns - 1; ++t) {
     auto offset = clusters_offset(t);
@@ -234,7 +233,6 @@ py::array_t<double> compute_scaling_xi_sum(
       }
     }
   }
-  return xi_sum_;
 }
 
 py::array_t<double> compute_log_xi_sum(
